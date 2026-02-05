@@ -240,7 +240,7 @@ class IEEE13bus(gym.Env):
             self.initial_p.append(self.network.sgen.at[i, 'p_mw'])
         return self.state, self.network.res_bus.iloc[all_bus].vm_pu.to_numpy()
 
-def create_13bus(pp_model_pth='models/case_13.mat'):
+def create_13bus(pp_model_pth='env/models/case_13.mat'):
     pp_net = pp.converter.from_mpc(pp_model_pth, casename_mpc_file='case_mpc')
     
     pp_net.sgen['p_mw'] = 0.0

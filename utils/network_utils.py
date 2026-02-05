@@ -127,8 +127,7 @@ def create_RX_from_rx(r: np.ndarray, x: np.ndarray, G: nx.Graph,
         assert is_pos_def(X)
     return R, X
 
-def get_intersecting_path(path1: Sequence[T], path2: Sequence[T]
-                          ) -> list[tuple[T, T]]:
+def get_intersecting_path(path1, path2):
     """Gets the intersection between two paths. Assumes that the paths only
     intersect in the beginning.
 

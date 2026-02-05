@@ -8,7 +8,7 @@ from topo_est import build_sensitivity, topology_recovery, rls_update, topology_
 from online_opt import online_update_Xp_NN
 from env import create_13bus, IEEE13bus, create_56bus, VoltageCtrl_nonlinear
 from models import SafePolicyNetwork_SetPoint
-from network_utils import create_RX_from_net
+from .network_utils import create_RX_from_net
 
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -180,7 +180,7 @@ def sample_random_topo_change():
     }
     id = np.random.choice(len(potential_changes))
     key = f's{id+1}'
-    return potential_changes[key], solution[key]
+    return potential_changes[key], solution[key], key
 
 def sample_random_topo_change_56bus():
     potential_changes = {
@@ -205,7 +205,7 @@ def sample_random_topo_change_56bus():
     }
     id = np.random.choice(len(potential_changes))
     key = f's{id+1}'
-    return potential_changes[key], solution[key]
+    return potential_changes[key], solution[key], key
 
 def collect_one_step(state, u, X):
     next_state = np.sqrt(X@u + np.expand_dims(state**2,1)) 
@@ -261,6 +261,7 @@ def run_traj_NN_w_topo_change_sens_lasso(controller_id, Q, R, env, state, all_st
     done= False
     X_P = None
     err_rls_history = []    
+    scenario_key = None
     for i in range(num_steps):
         action = torch.zeros((n_bus,1)).to(device)
         dis_q = torch.zeros((n_prob,1)).to(device)
@@ -303,9 +304,9 @@ def run_traj_NN_w_topo_change_sens_lasso(controller_id, Q, R, env, state, all_st
             env.step_disturbance()
         if i == topo_change_step:
             if bus56:
-                topo_change, solution = sample_random_topo_change_56bus()
+                topo_change, solution, scenario_key = sample_random_topo_change_56bus()
             else:
-                topo_change, solution = sample_random_topo_change()
+                topo_change, solution, scenario_key = sample_random_topo_change()
             print('topology changed: ', topo_change)
             change_topo(env, topo_change)
 
@@ -407,7 +408,7 @@ def run_traj_NN_w_topo_change_sens_lasso(controller_id, Q, R, env, state, all_st
     else:
         sens_err = np.linalg.norm(X_c[:,controller_id] - X_rls)
     cost_traj = np.array(cost_traj)
-    return policy_list, state_traj, pp_traj, action_traj, last_action, episodic_cost, after_topo_cost, H_s, y_q_theta_dict, G_t_theta_dict, X_P, online_update_flag, sense_converge_time, cost_traj, sens_err
+    return policy_list, state_traj, pp_traj, action_traj, last_action, episodic_cost, after_topo_cost, H_s, y_q_theta_dict, G_t_theta_dict, X_P, online_update_flag, sense_converge_time, cost_traj, sens_err, scenario_key
 
 def no_change(detector):
     detector.topo_change_detected = False
@@ -445,6 +446,7 @@ def run_traj_NN_w_topo_change_lasso(controller_id, Q, R, env, state, all_state, 
     node_succ = 0
     detect_succ = 0
     solution = None
+    scenario_key = None
     
     if bus56:
         X_rls = X_sens.copy()
@@ -511,9 +513,9 @@ def run_traj_NN_w_topo_change_lasso(controller_id, Q, R, env, state, all_state, 
             env.step_disturbance()
         if i == topo_change_step:
             if bus56:
-                topo_change, solution = sample_random_topo_change_56bus()
+                topo_change, solution, scenario_key = sample_random_topo_change_56bus()
             else:
-                topo_change, solution = sample_random_topo_change()
+                topo_change, solution, scenario_key = sample_random_topo_change()
             print('topology changed: ', topo_change)
             change_topo(env, topo_change)
 
@@ -635,7 +637,7 @@ def run_traj_NN_w_topo_change_lasso(controller_id, Q, R, env, state, all_state, 
         final_success = (set(solution) == set(expected_lines))
     print(sense_converge_time)
     return policy_list, state_traj, pp_traj, action_traj, last_action, episodic_cost, after_topo_cost, H_s, y_q_theta_dict, G_t_theta_dict, X_P, \
-        online_update_flag, cost_traj, sens_err, sense_converge_time, line_succ_final, node_succ, detect_succ, final_success
+        online_update_flag, cost_traj, sens_err, sense_converge_time, line_succ_final, node_succ, detect_succ, final_success, scenario_key
 
 def test_online_performance_NN_w_topo_change_lasso(traj_num, controller_id, Q, R, path_base, topo_name, probing_nodes, probing_nodes_id, 
                                num_steps=1000, env_name = '13bus',
@@ -681,6 +683,11 @@ def test_online_performance_NN_w_topo_change_lasso(traj_num, controller_id, Q, R
     line_succ_sum = 0
     node_succ_sum = 0
     detect_succ_sum = 0
+    scenario_keys = [f"s{i}" for i in range(1, 9)]
+    scenario_stats = {
+        key: {"count": 0, "detect": 0, "node": 0, "line": 0, "success": 0}
+        for key in scenario_keys
+    }
     
     for run_id in tqdm(range(traj_num)):
         if env_name == '13bus':
@@ -764,7 +771,7 @@ def test_online_performance_NN_w_topo_change_lasso(traj_num, controller_id, Q, R
         detect_succ = 0
         # try:
         if use_sense:
-            policy_list, state_traj, pp_traj, action_traj, last_action, episodic_cost, after_topo_cost, H_s, _, _, X_P, _, sense_converge_time, cost_traj, sens_err = \
+            policy_list, state_traj, pp_traj, action_traj, last_action, episodic_cost, after_topo_cost, H_s, _, _, X_P, _, sense_converge_time, cost_traj, sens_err, scenario_key = \
             run_traj_NN_w_topo_change_sens_lasso(controller_id, Q_torch, R_torch, env, state, all_state, seed, X_full, lines, probing_nodes_id, \
                 y_q_theta_dict, G_t_theta_dict, name_list, policy_list, state_traj, \
                 pp_traj, action_traj, cost_traj, episodic_cost, after_topo_cost, last_action, H_s, Phi_1, Phi_2,\
@@ -775,7 +782,7 @@ def test_online_performance_NN_w_topo_change_lasso(traj_num, controller_id, Q, R
             ep_after_topo_cost_list.append(after_topo_cost)
             sense_est_time_list.append(sense_converge_time)
         else:
-            policy_list, state_traj, pp_traj, action_traj, last_action, episodic_cost, after_topo_cost, H_s, _, _, X_P, _, cost_traj, sens_err, sense_converge_time, line_succ, node_succ, detect_succ, final_success = \
+            policy_list, state_traj, pp_traj, action_traj, last_action, episodic_cost, after_topo_cost, H_s, _, _, X_P, _, cost_traj, sens_err, sense_converge_time, line_succ, node_succ, detect_succ, final_success, scenario_key = \
             run_traj_NN_w_topo_change_lasso(controller_id, Q_torch, R_torch, env, state, all_state, seed, X_full, lines, probing_nodes_id, \
                     y_q_theta_dict, G_t_theta_dict, name_list, policy_list, state_traj, \
                     pp_traj, action_traj, cost_traj, episodic_cost, after_topo_cost, last_action, H_s, Phi_1, Phi_2,\
@@ -797,9 +804,34 @@ def test_online_performance_NN_w_topo_change_lasso(traj_num, controller_id, Q, R
         else:
             if final_success:
                 succ_good_sens += 1
+        if scenario_key in scenario_stats:
+            stats = scenario_stats[scenario_key]
+            stats["count"] += 1
+            if use_sense:
+                stats["success"] += int(sense_converge_time < num_steps)
+            else:
+                stats["detect"] += int(detect_succ)
+                stats["node"] += int(node_succ)
+                stats["line"] += int(line_succ)
+                stats["success"] += int(final_success)
     succ_rate = succ_good_sens/traj_num
     line_succ_rate = line_succ_sum/traj_num
     print(f'successful rate for successfully detect the event {detect_succ_sum/traj_num}, containing the right nodes is: {node_succ_sum/traj_num}, containing the right line is: {line_succ_rate}, success rate {succ_rate}')
+    for key in scenario_keys:
+        stats = scenario_stats[key]
+        if stats["count"] == 0:
+            print(f'scenario {key}: no trials')
+            continue
+        if use_sense:
+            print(f'scenario {key}: success rate {stats["success"]/stats["count"]} ({stats["success"]}/{stats["count"]})')
+        else:
+            print(
+                f'scenario {key}: detect {stats["detect"]/stats["count"]}, '
+                f'node {stats["node"]/stats["count"]}, '
+                f'line {stats["line"]/stats["count"]}, '
+                f'success {stats["success"]/stats["count"]} '
+                f'({stats["success"]}/{stats["count"]})'
+            )
     return ep_cost_list, ep_after_topo_cost_list, sense_est_time_list, cost_traj_list, sens_error_list, succ_rate
 
 def traj_rollout_no_update(controller_id, env, state, all_state, X_full, lines, probing_nodes_id,\

@@ -1,7 +1,7 @@
 import itertools
 import numpy as np
 from collections import deque
-from topo_estimate import compute_full_R
+from .topo_estimate import compute_full_R
 import gurobipy as gp
 from gurobipy import GRB
 
@@ -900,7 +900,6 @@ def L1_sub(
     else:
         cand.sort(key=lambda x: (x[1], x[0]))
         _, _, _, gS, _, _ = cand[0]
-
     supp = np.where(np.abs(gS) > eps_gamma)[0]
     return supp
 
@@ -924,6 +923,7 @@ class topology_detection_lasso:
                  jump_ratio=None,          # if None, use robust z-score (≈3.5σ) instead
                  tol=None,                 # if None, adaptive from dispersion
                  mask_gamma=None,
+                 supp_method="qp",         # "qp" (default) or "lad"
                  k_level=1.0,
                  active_th=0.01):         
         self.n_rows   = int(n_rows)
@@ -935,6 +935,9 @@ class topology_detection_lasso:
         self.tol_user = tol
         self.mask_gamma_user = mask_gamma  # <-- used directly below
         self.active_th = float(active_th)
+        self.supp_method = str(supp_method).lower().strip()
+        if self.supp_method not in ("qp", "lad"):
+            raise ValueError("supp_method must be 'qp' or 'lad'")
 
         # history buffers
         self.hist       = np.zeros((self.window, self.n_rows), dtype=bool)
@@ -1223,19 +1226,37 @@ class topology_detection_lasso:
             dtype=int
         )
 
-        # --- First regression ---
-        gamma, Delta_Xinv, R_hat = estimate_gamma_l1_screened_auto(
-            E_org, V_obs, R_hist_T,
-            lam=None,
-            err_tol=1.0e-2,
-            reweight_iters=0,
-            nonneg=False,
-            verbose=False,
-            signs=signs_global,
-            topo_dict=self.previous_lines,
-            changed_lines=changed_lines,
-            eps_gamma=1.0
-        )
+        # --- First regression (QP or LAD for support) ---
+        if self.supp_method == "lad":
+            supp = L1_sub(
+                E_org, V_obs, R_hist_T,
+                lam=1e-3, # lam influence the performance of lad significantly
+                err_tol=1.0e-2,
+                nonneg=False,
+                verbose=False,
+                signs=signs_global,
+                topo_dict=self.previous_lines,
+                changed_lines=changed_lines,
+                eps_gamma=1.0,
+            )
+            if supp.size == 0:
+                line_status_dict = {'line': [], 'err': 0.0, 'fault': True}
+                self.topo_change_detected = False
+                return None, line_status_dict, 0
+            gamma, Delta_Xinv, R_hat = debias(supp, E_org, V_obs, R_hist_T, signs_global)
+        else:
+            gamma, Delta_Xinv, R_hat = estimate_gamma_l1_screened_auto(
+                E_org, V_obs, R_hist_T,
+                lam=None, # used None before, an automatic lam selection is implemented inside, you can also set a fixed value here
+                err_tol=1.0e-2,
+                reweight_iters=0,
+                nonneg=False,
+                verbose=False,
+                signs=signs_global,
+                topo_dict=self.previous_lines,
+                changed_lines=changed_lines,
+                eps_gamma=1.0
+            )
         err_prefit = float(np.linalg.norm(self.R_hist.T - R_hat, ord='fro'))
 
         # Quick success check (loose mask)
