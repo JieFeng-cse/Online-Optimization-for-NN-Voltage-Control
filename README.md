@@ -16,6 +16,7 @@ This project is pure Python. Typical dependencies:
 - numpy, scipy
 - torch
 - pandapower
+- numba
 - gym
 - networkx
 - matplotlib
@@ -32,13 +33,32 @@ If you plan to use the LAD/LASSO solvers in topology detection, ensure `gurobipy
 conda create -n topo-adapt python=3.8 -y
 conda activate topo-adapt
 conda install -y numpy scipy matplotlib tqdm networkx
-pip install torch pandapower gym
+pip install torch pandapower gym numba
 ```
 
 Optional (requires a Gurobi license):
 ```bash
 pip install gurobipy
 ```
+
+### Pandapower API Compatibility (Important)
+
+The environment simulation code in this repository currently uses an older `pandapower` API and intentionally keeps:
+
+```python
+pp_net = pp.converter.from_mpc(pp_model_pth, casename_mpc_file='case_mpc')
+```
+
+If you use a newer `pandapower` release, use:
+
+```python
+from pandapower.converter.matpower import from_mpc
+pp_net = from_mpc(pp_model_pth, casename_mpc_file='case_mpc')
+```
+
+Also install `numba`, since newer `pandapower` setups commonly rely on it for performance and compatibility.
+
+For this repo, do not change the code path if your local build is already configured for the older `pandapower` interface.
 
 ### 2) Run a real‑world load demo (notebook)
 Open:
@@ -94,6 +114,15 @@ varying_topo_online_opt/
 
 ## Citation
 
-```
-TODO: Add citation once public.
+If this repository is helpful in your research, please cite:
+
+Paper: https://arxiv.org/abs/2602.10355
+
+```bibtex
+@article{feng2026efficient,
+  title={Efficient Policy Adaptation for Voltage Control Under Unknown Topology Changes},
+  author={Feng, Jie and Shi, Yuanyuan and Deka, Deepjyoti},
+  journal={arXiv preprint arXiv:2602.10355},
+  year={2026}
+}
 ```
